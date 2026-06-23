@@ -48,10 +48,13 @@ tmux new-session -d -s "${SESSION}" "
   python -c 'import torch; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available())';
   set -e;
   bash setup.sh;
-  echo '===== STEP 1: graph-level (reproduce + mimicry) =====';
+  echo '===== STEP 1: graph-level (reproduce + RANDOM mimicry only) =====';
+  echo '    (graph-level greedy is ~96k embeds / hours AND uninformative -- mean-pooling';
+  echo '     over ~9000 nodes washes out sparse insertion; random already shows ~0% evasion.';
+  echo '     run greedy manually with a tiny --n_graphs/--budgets if you want the data point.)';
   python smoke_reproduce.py --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --seeds 5 2>&1 | tee results/log_reproduce_${DATASET}.txt;
-  python smoke_attack.py    --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --mode both --seeds 3 2>&1 | tee results/log_attack_${DATASET}.txt;
-  echo '===== STEP 2: node-level (decisive go/no-go) =====';
+  python smoke_attack.py    --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --mode random --seeds 3 2>&1 | tee results/log_attack_${DATASET}.txt;
+  echo '===== STEP 2: node-level (THE decisive go/no-go) =====';
   bash setup_entity.sh ${ENTITY};
   python smoke_attack_entity.py --magic_root ./MAGIC --dataset ${ENTITY} --device ${DEVICE} --n_targets 1000 --budgets 0 2 5 10 20 --seeds 3 2>&1 | tee results/log_entity_${ENTITY}.txt;
   echo '===== DONE. push results:  git add -f results/* && git commit -m \"server smoke results\" && git push =====';
