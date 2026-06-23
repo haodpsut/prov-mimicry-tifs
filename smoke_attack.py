@@ -93,14 +93,13 @@ def main():
     ap.add_argument("--mode", default="both", choices=["random", "greedy", "both"])
     ap.add_argument("--candidates", type=int, default=32, help="C candidate edges per greedy step")
     ap.add_argument("--alpha", type=float, default=0.01, help="calibrated FPR for the evasion threshold")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seeds", type=int, default=3, help="attack seeds to average (Trans-grade); greedy is costly")
     ap.add_argument("--out", default="results/attack_{dataset}.json")
     args = ap.parse_args()
 
     device = f"cuda:{args.device}" if args.device >= 0 else "cpu"
     common.setup_magic(args.magic_root)
     device = torch.device(device if (args.device < 0 or torch.cuda.is_available()) else "cpu")
-    rng = np.random.RandomState(args.seed)
 
     model, pooler, data, n_feat, e_feat = common.load_batch_model(args.dataset, device)
     benign, attack = common.benign_attack_indices(data)
@@ -122,32 +121,36 @@ def main():
     ctx = (n_feat, e_feat, device, args.dataset, scorer, args.candidates)
 
     report = {"dataset": args.dataset, "alpha": args.alpha, "threshold": threshold,
-              "n_neighbors": n_neighbors, "n_attack_graphs": len(sub), "budgets": args.budgets,
+              "n_neighbors": n_neighbors, "n_attack_graphs": len(sub), "seeds": args.seeds,
+              "budgets": args.budgets,
               "note": "evasion = anomaly score falls BELOW the calibrated threshold (misclassified benign)"}
 
     if args.mode in ("random", "both"):
-        per = {B: [] for B in args.budgets}
-        for j, i in enumerate(sub):
-            res = random_attack(model, pooler, data["dataset"][i][0], args.budgets, etype_p, rng, ctx)
-            for B in args.budgets:
-                per[B].append(res[B])
-            print(f"[random] graph {j+1}/{len(sub)} base={per[args.budgets[0]][-1]:.3f} "
-                  f"-> B={args.budgets[-1]}: {res[args.budgets[-1]]:.3f}")
-        report["random"] = summarize(per, threshold)
+        # per seed: evasion_rate[B] over the attack-graph subset; then mean/std across seeds.
+        ev_seeds, sc_seeds = [], []
+        for s in range(args.seeds):
+            rng = np.random.RandomState(1000 + s)
+            per = {B: [] for B in args.budgets}
+            for j, i in enumerate(sub):
+                res = random_attack(model, pooler, data["dataset"][i][0], args.budgets, etype_p, rng, ctx)
+                for B in args.budgets:
+                    per[B].append(res[B])
+            ev_seeds.append([float((np.array(per[B]) < threshold).mean()) for B in args.budgets])
+            sc_seeds.append([float(np.array(per[B]).mean()) for B in args.budgets])
+            print(f"[random] seed {s+1}/{args.seeds} evasion@B={args.budgets[-1]}: {ev_seeds[-1][-1]:.2f}")
+        report["random"] = _agg_curve(args.budgets, ev_seeds, sc_seeds)
 
     if args.mode in ("greedy", "both"):
         budget = max(args.budgets)
-        trajs = []
-        for j, i in enumerate(sub):
-            tr = greedy_attack(model, pooler, data["dataset"][i][0], budget, etype_p, rng, ctx)
-            trajs.append(tr)
-            print(f"[greedy] graph {j+1}/{len(sub)} {tr[0]:.3f} -> {tr[-1]:.3f}")
-        trajs = np.array(trajs)  # (n_graphs, budget+1)
-        report["greedy"] = {
-            "budgets": list(range(budget + 1)),
-            "mean_score": trajs.mean(axis=0).tolist(),
-            "evasion_rate": (trajs < threshold).mean(axis=0).tolist(),
-        }
+        ev_seeds, sc_seeds = [], []
+        for s in range(args.seeds):
+            rng = np.random.RandomState(2000 + s)
+            trajs = [greedy_attack(model, pooler, data["dataset"][i][0], budget, etype_p, rng, ctx) for i in sub]
+            trajs = np.array(trajs)  # (n_graphs, budget+1)
+            ev_seeds.append((trajs < threshold).mean(axis=0).tolist())
+            sc_seeds.append(trajs.mean(axis=0).tolist())
+            print(f"[greedy] seed {s+1}/{args.seeds} evasion@B={budget}: {ev_seeds[-1][-1]:.2f}")
+        report["greedy"] = _agg_curve(list(range(budget + 1)), ev_seeds, sc_seeds)
 
     here = os.path.dirname(os.path.abspath(__file__))
     out_path = os.path.join(here, args.out.format(dataset=args.dataset))
@@ -158,14 +161,17 @@ def main():
     print(f"\nsaved -> {out_path}")
 
 
-def summarize(per_budget, threshold):
-    out = {"budget": [], "mean_score": [], "evasion_rate": []}
-    for B in sorted(per_budget):
-        s = np.array(per_budget[B])
-        out["budget"].append(B)
-        out["mean_score"].append(float(s.mean()))
-        out["evasion_rate"].append(float((s < threshold).mean()))
-    return out
+def _agg_curve(budgets, ev_seeds, sc_seeds):
+    """Aggregate per-seed curves -> mean/std per budget."""
+    ev = np.array(ev_seeds)  # (seeds, n_budgets)
+    sc = np.array(sc_seeds)
+    return {
+        "budget": list(budgets),
+        "evasion_rate_mean": ev.mean(axis=0).tolist(),
+        "evasion_rate_std": ev.std(axis=0).tolist(),
+        "mean_score_mean": sc.mean(axis=0).tolist(),
+        "mean_score_std": sc.std(axis=0).tolist(),
+    }
 
 
 if __name__ == "__main__":

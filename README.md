@@ -35,10 +35,14 @@ pip install torch --index-url https://download.pytorch.org/whl/cu118
 pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu118/repo.html
 bash setup.sh                      # clones MAGIC + unzips its graphs
 
-python smoke_reproduce.py --magic_root ./MAGIC --dataset streamspot --device 0
+python smoke_reproduce.py --magic_root ./MAGIC --dataset streamspot --device 0 --seeds 5
 python smoke_attack.py    --magic_root ./MAGIC --dataset streamspot --device 0 \
-    --n_graphs 25 --budgets 0 5 10 20 40 --mode both --candidates 32
+    --n_graphs 25 --budgets 0 5 10 20 40 --mode both --candidates 32 --seeds 3
 ```
+
+Both scripts average over seeds and report mean/std (Trans-grade): `--seeds` is the
+number of split seeds (reproduce) / attack seeds (attack). For a first quick probe
+use `--seeds 1`; scale up once the GPU run is confirmed working.
 
 Results (JSON + tee'd logs) land in `results/`. **Please commit and push back**:
 `git add -f results/* && git commit -m "server smoke results" && git push`

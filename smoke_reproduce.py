@@ -62,11 +62,21 @@ def _f1(y, p):
     return float(2 * pr * r / (pr + r + 1e-9))
 
 
+def _agg(dicts, keys):
+    """mean/std across a list of metric dicts, for the given keys."""
+    out = {}
+    for k in keys:
+        v = np.array([d[k] for d in dicts], dtype=float)
+        out[k] = {"mean": float(v.mean()), "std": float(v.std())}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--magic_root", default="./MAGIC")
     ap.add_argument("--dataset", default="streamspot", choices=["streamspot", "wget"])
     ap.add_argument("--device", type=int, default=-1)
+    ap.add_argument("--seeds", type=int, default=5, help="number of split seeds to average (Trans-grade)")
     ap.add_argument("--out", default="results/reproduce_{dataset}.json")
     args = ap.parse_args()
 
@@ -84,31 +94,34 @@ def main():
     X_benign = common.embed_index(model, pooler, data, list(benign), n_feat, e_feat, device, args.dataset)
     X_attack = common.embed_index(model, pooler, data, list(attack), n_feat, e_feat, device, args.dataset)
 
-    rng = np.random.RandomState(0)
     train_count = 400 if args.dataset == "streamspot" else 100
     n_neighbors = min(int(train_count * 0.02), 10)
+    alphas = (0.001, 0.01, 0.05)
 
-    perm = rng.permutation(len(benign))
-    tr = perm[:train_count]                          # benign KNN reference (train)
-    rest = perm[train_count:]
-    cal = rest[: len(rest) // 2]                      # benign calibration (for honest threshold)
-    ben_test = rest[len(rest) // 2:]                  # benign held-out test
+    # Repeat over split seeds: embeddings are fixed; only the benign train/calib/test
+    # partition (and hence the KNN reference + honest threshold) varies per seed.
+    tuned_runs, calib_runs = [], {a: [] for a in alphas}
+    for s in range(args.seeds):
+        perm = np.random.RandomState(s).permutation(len(benign))
+        tr, rest = perm[:train_count], perm[train_count:]
+        cal, ben_test = rest[: len(rest) // 2], rest[len(rest) // 2:]
+        x_train = X_benign[tr]
+        x_eval = np.concatenate([X_benign[ben_test], X_attack], axis=0)
+        y_eval = np.concatenate([np.zeros(len(ben_test)), np.ones(len(X_attack))])
+        scorer = common.KNNScorer(x_train, n_neighbors)
+        cal_scores, eval_scores = scorer(X_benign[cal]), scorer(x_eval)
+        tuned_runs.append(test_tuned_metrics(eval_scores, y_eval))
+        for a in alphas:
+            calib_runs[a].append(calibrated_metrics(eval_scores, y_eval, cal_scores, a))
 
-    x_train = X_benign[tr]
-    x_eval = np.concatenate([X_benign[ben_test], X_attack], axis=0)
-    y_eval = np.concatenate([np.zeros(len(ben_test)), np.ones(len(X_attack))])
-    cal_scores = common.knn_anomaly_scores(x_train, X_benign[cal], n_neighbors)
-    eval_scores = common.knn_anomaly_scores(x_train, x_eval, n_neighbors)
-
+    mkeys = ["precision", "recall", "f1", "fpr", "auc"]
     report = {
-        "dataset": args.dataset,
-        "n_neighbors": n_neighbors,
-        "split": {"train": int(train_count), "calib": int(len(cal)),
-                  "benign_test": int(len(ben_test)), "attack_test": int(len(X_attack))},
-        "A_test_tuned (MAGIC-style, leaks test labels)": test_tuned_metrics(eval_scores, y_eval),
-        "B_calibrated (honest, no test access)": [
-            calibrated_metrics(eval_scores, y_eval, cal_scores, a) for a in (0.001, 0.01, 0.05)
-        ],
+        "dataset": args.dataset, "seeds": args.seeds, "n_neighbors": n_neighbors,
+        "split": {"train": int(train_count), "attack_test": int(len(X_attack))},
+        "A_test_tuned (MAGIC-style, leaks test labels)": _agg(tuned_runs, mkeys),
+        "B_calibrated (honest, no test access)": {
+            f"alpha={a}": _agg(calib_runs[a], mkeys) for a in alphas
+        },
     }
     import os
     # setup_magic() chdir'd into MAGIC, so anchor outputs to this file's folder.
