@@ -16,23 +16,33 @@ We build only on the **public** MAGIC repo (`FDUDSDE/MAGIC`), which ships model
 checkpoints and pre-processed StreamSpot/Wget graphs, so the smoke test attacks
 the *published* detector and needs no large DARPA download.
 
-## Run on the GPU server
+## Run on the GPU server (conda + tmux)
+
+One command creates the conda env (adding a 4090-compatible torch+dgl) and runs
+the whole smoke test inside a detached **tmux** session so it survives SSH drops:
 
 ```bash
+# adjust CUDA tag to the server (cu118 / cu121); DATASET/DEVICE optional
+CUDA=cu118 DATASET=streamspot DEVICE=0 bash run_server.sh
+tmux attach -t prov-smoke      # watch it; detach with Ctrl-b then d
+```
+
+Or step by step:
+
+```bash
+conda env create -f environment.yml -n prov-mimicry && conda activate prov-mimicry
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu118/repo.html
 bash setup.sh                      # clones MAGIC + unzips its graphs
-pip install -r requirements.txt    # see notes re: RTX 4090 / CUDA in the file
 
-# 1) reproduce + inflation gap
 python smoke_reproduce.py --magic_root ./MAGIC --dataset streamspot --device 0
-
-# 2) insertion mimicry POC (random + greedy)
-python smoke_attack.py --magic_root ./MAGIC --dataset streamspot --device 0 \
+python smoke_attack.py    --magic_root ./MAGIC --dataset streamspot --device 0 \
     --n_graphs 25 --budgets 0 5 10 20 40 --mode both --candidates 32
 ```
 
-Results are written to `results/*.json`. **Please commit `results/` and push back**
-(the `.gitignore` ignores the big `MAGIC/` clone and the pkl, but `git add -f
-results/*.json` to include the outputs).
+Results (JSON + tee'd logs) land in `results/`. **Please commit and push back**:
+`git add -f results/* && git commit -m "server smoke results" && git push`
+(`.gitignore` skips the big `MAGIC/` clone and the pkl, so force-add `results/`).
 
 ## What to look for (go / no-go)
 
