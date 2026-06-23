@@ -7,6 +7,7 @@ set -euo pipefail
 ENV="${ENV:-prov-mimicry}"
 SESSION="${SESSION:-prov-smoke}"
 DATASET="${DATASET:-streamspot}"
+ENTITY="${ENTITY:-theia}"          # node-level dataset for the decisive go/no-go run
 DEVICE="${DEVICE:-0}"
 CUDA="${CUDA:-cu121}"               # RTX 4090 server runs CUDA 12.1
 TORCH="${TORCH:-2.1.0}"            # torch version (cu121 build)
@@ -45,10 +46,15 @@ tmux new-session -d -s "${SESSION}" "
   source \"\$(conda info --base)/etc/profile.d/conda.sh\";
   conda activate ${ENV};
   python -c 'import torch; print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available())';
+  set -e;
   bash setup.sh;
-  python smoke_reproduce.py --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} 2>&1 | tee results/log_reproduce_${DATASET}.txt;
-  python smoke_attack.py    --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --mode both 2>&1 | tee results/log_attack_${DATASET}.txt;
-  echo '=== DONE. commit results:  git add -f results/*  && git commit -m \"server smoke results\" && git push ===';
+  echo '===== STEP 1: graph-level (reproduce + mimicry) =====';
+  python smoke_reproduce.py --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --seeds 5 2>&1 | tee results/log_reproduce_${DATASET}.txt;
+  python smoke_attack.py    --magic_root ./MAGIC --dataset ${DATASET} --device ${DEVICE} --mode both --seeds 3 2>&1 | tee results/log_attack_${DATASET}.txt;
+  echo '===== STEP 2: node-level (decisive go/no-go) =====';
+  bash setup_entity.sh ${ENTITY};
+  python smoke_attack_entity.py --magic_root ./MAGIC --dataset ${ENTITY} --device ${DEVICE} --n_targets 1000 --budgets 0 2 5 10 20 --seeds 3 2>&1 | tee results/log_entity_${ENTITY}.txt;
+  echo '===== DONE. push results:  git add -f results/* && git commit -m \"server smoke results\" && git push =====';
   exec bash
 "
 echo "Launched tmux session '${SESSION}'. Attach with:  tmux attach -t ${SESSION}"
