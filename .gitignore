@@ -1,0 +1,7 @@
+MAGIC/
+__pycache__/
+*.pyc
+results/*.json
+!results/.gitkeep
+.venv/
+*.pt

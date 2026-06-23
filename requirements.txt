@@ -1,0 +1,14 @@
+# MAGIC was pinned to torch==1.12.1 / dgl==1.0.0, but those predate the RTX 4090
+# (Ada / sm_89). On a 4090 use a CUDA 11.8+ build of a recent torch + matching DGL.
+# The smoke code only uses stable DGL APIs (add_edges, batch, from_networkx, ops),
+# so a current stack works. Suggested (adjust to the server's CUDA):
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install dgl -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+#
+# Plus the lightweight deps:
+numpy
+scikit-learn
+networkx
+xxhash
+tqdm
