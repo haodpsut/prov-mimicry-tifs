@@ -29,12 +29,15 @@ def setup_magic(magic_root):
     if magic_root not in sys.path:
         sys.path.insert(0, magic_root)
     from model.autoencoder import build_model          # noqa: E402
-    from utils.loaddata import load_batch_level_dataset, transform_graph  # noqa: E402
+    from utils.loaddata import (load_batch_level_dataset, transform_graph,  # noqa: E402
+                                load_metadata, load_entity_level_dataset)
     from utils.poolers import Pooling                   # noqa: E402
     from utils.utils import set_random_seed             # noqa: E402
     _M.update(dict(build_model=build_model,
                    load_batch_level_dataset=load_batch_level_dataset,
                    transform_graph=transform_graph,
+                   load_metadata=load_metadata,
+                   load_entity_level_dataset=load_entity_level_dataset,
                    Pooling=Pooling,
                    set_random_seed=set_random_seed,
                    root=magic_root))
@@ -120,3 +123,30 @@ def benign_attack_indices(data):
     benign = np.where(labels == 0)[0]
     attack = np.where(labels == 1)[0]
     return benign, attack
+
+
+# ----------------------------- entity (node) level -----------------------------
+
+def load_entity_model(dataset, device):
+    """Load a node-level (trace/theia/cadets) MAGIC detector + metadata. Faithful to MAGIC eval.py."""
+    _M["set_random_seed"](0)
+    meta = _M["load_metadata"](dataset)   # reads shipped metadata.json (no DARPA reprocessing)
+    n_feat, e_feat = meta["node_feature_dim"], meta["edge_feature_dim"]
+    args = Args(num_hidden=64, num_layers=3, negative_slope=0.2, mask_rate=0.5,
+                alpha_l=3, n_dim=n_feat, e_dim=e_feat, pooling="mean")
+    model = _M["build_model"](args)
+    model.load_state_dict(torch.load(f"./checkpoints/checkpoint-{dataset}.pt", map_location=device))
+    model = model.to(device).eval()
+    return model, meta, n_feat, e_feat
+
+
+def load_entity_graph(dataset, split, n):
+    """Load a single already-transformed entity graph (has ndata['attr']/['type'])."""
+    return _M["load_entity_level_dataset"](dataset, split, n)
+
+
+@torch.no_grad()
+def embed_entity(model, g, device):
+    """MAGIC node embeddings for an entity graph (already carries ndata['attr'])."""
+    g = g.to(device)
+    return model.embed(g).detach().cpu().numpy()

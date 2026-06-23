@@ -51,6 +51,23 @@ Results (JSON + tee'd logs) land in `results/`. **Please commit and push back**:
 `git add -f results/* && git commit -m "server smoke results" && git push`
 (`.gitignore` skips the big `MAGIC/` clone and the pkl, so force-add `results/`).
 
+### Node-level attack (DARPA -- the decisive go/no-go)
+
+Graph-level StreamSpot is a hard target (mean-pooling over ~9000 nodes washes out
+sparse insertions). The real attack surface is node-level, where a malicious
+entity's embedding is dominated by its small local neighborhood:
+
+```bash
+bash setup_entity.sh theia          # unzip the (large) theia entity dataset
+python smoke_attack_entity.py --magic_root ./MAGIC --dataset theia --device 0 \
+    --n_targets 1000 --budgets 0 2 5 10 20 --seeds 3
+git add -f results/* && git commit -m "entity smoke results" && git push
+```
+
+Go signal: `evasion_rate_mean` rising from ~0 (baseline, B=0) toward 1 as a small
+per-node budget `B` of benign in-edges is added. (theia = single test graph,
+smallest; cadets also works; trace is multi-graph -- handled later.)
+
 ## What to look for (go / no-go)
 
 - `smoke_reproduce.py`: a large gap between `A_test_tuned` and `B_calibrated`
