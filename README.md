@@ -22,17 +22,20 @@ One command creates the conda env (adding a 4090-compatible torch+dgl) and runs
 the whole smoke test inside a detached **tmux** session so it survives SSH drops:
 
 ```bash
-# adjust CUDA tag to the server (cu118 / cu121); DATASET/DEVICE optional
-CUDA=cu118 DATASET=streamspot DEVICE=0 bash run_server.sh
+# defaults are tuned for the RTX 4090 server (CUDA 12.1). RECREATE=1 wipes a broken env.
+DATASET=streamspot DEVICE=0 bash run_server.sh
 tmux attach -t prov-smoke      # watch it; detach with Ctrl-b then d
 ```
 
-Or step by step:
+Or step by step (verified combo for RTX 4090 / CUDA 12.1):
 
 ```bash
-conda env create -f environment.yml -n prov-mimicry && conda activate prov-mimicry
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu118/repo.html
+conda env remove -n prov-mimicry -y                 # wipe a broken env first
+conda create -n prov-mimicry python=3.10 -y && conda activate prov-mimicry
+pip install "numpy<2" scikit-learn networkx xxhash tqdm
+pip install torch==2.1.0 --index-url https://download.pytorch.org/whl/cu121
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu121/repo.html
+python -c "import torch,dgl; print(torch.__version__, torch.cuda.is_available(), dgl.__version__)"
 bash setup.sh                      # clones MAGIC + unzips its graphs
 
 python smoke_reproduce.py --magic_root ./MAGIC --dataset streamspot --device 0 --seeds 5

@@ -1,7 +1,8 @@
 # Conda env for the smoke test. Create with:  conda env create -f environment.yml -n prov-mimicry
 # torch + dgl are installed separately (see run_server.sh / README) so the CUDA
-# build matches the server's driver -- MAGIC pinned torch 1.12 which predates the
-# RTX 4090 (Ada / sm_89), so use a cu118+ torch 2.x stack there.
+# build matches the server. Verified combo for RTX 4090 (Ada / sm_89) + CUDA 12.1:
+#   torch==2.1.0 (cu121)  +  dgl from the torch-2.1/cu121 wheel channel.
+# numpy MUST stay <2 -- torch 2.1 / dgl 2.x were built against numpy 1.x.
 channels:
   - conda-forge
 dependencies:
@@ -10,7 +11,7 @@ dependencies:
   - unzip
   - git
   - pip:
-      - numpy
+      - "numpy<2"
       - scikit-learn
       - networkx
       - xxhash

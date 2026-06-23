@@ -8,19 +8,34 @@ ENV="${ENV:-prov-mimicry}"
 SESSION="${SESSION:-prov-smoke}"
 DATASET="${DATASET:-streamspot}"
 DEVICE="${DEVICE:-0}"
-CUDA="${CUDA:-cu118}"            # match the server's CUDA (cu118 / cu121 ...)
+CUDA="${CUDA:-cu121}"               # RTX 4090 server runs CUDA 12.1
+TORCH="${TORCH:-2.1.0}"            # torch version (cu121 build)
 TORCH_CH="${TORCH_CH:-torch-2.1}"  # DGL wheel channel matching the torch version
+RECREATE="${RECREATE:-0}"          # set 1 to wipe and rebuild a broken env
 
 command -v conda >/dev/null || { echo "conda not found on PATH"; exit 1; }
 command -v tmux  >/dev/null || { echo "tmux not found on PATH"; exit 1; }
 
+if [ "${RECREATE}" = "1" ]; then
+  echo ">> removing existing env '${ENV}'"
+  conda env remove -n "${ENV}" -y || true
+fi
+
 # 1) create the conda env once (CPU deps), then add torch + dgl for the server CUDA.
-if ! conda env list | grep -qE "^\s*${ENV}\s"; then
-  echo ">> creating conda env '${ENV}'"
+if ! conda env list | grep -qE "/${ENV}\$"; then
+  echo ">> creating conda env '${ENV}'  (CUDA=${CUDA}, torch=${TORCH})"
   conda env create -f environment.yml -n "${ENV}"
-  conda run -n "${ENV}" pip install torch --index-url "https://download.pytorch.org/whl/${CUDA}"
+  conda run -n "${ENV}" pip install "torch==${TORCH}" --index-url "https://download.pytorch.org/whl/${CUDA}"
   conda run -n "${ENV}" pip install dgl -f "https://data.dgl.ai/wheels/${TORCH_CH}/${CUDA}/repo.html"
 fi
+
+# verify the stack imports + sees the GPU before doing real work
+conda run -n "${ENV}" python - <<'PY'
+import torch, dgl
+print("torch", torch.__version__, "| cuda build", torch.version.cuda,
+      "| cuda available", torch.cuda.is_available())
+print("dgl", dgl.__version__, "imports OK")
+PY
 
 mkdir -p results
 
